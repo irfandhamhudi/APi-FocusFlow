@@ -163,6 +163,10 @@ export const loginUser = async (req, res) => {
       secure: true, // Selalu true di produksi untuk HTTPS
       sameSite: "none", // Diperlukan untuk lintas situs
       maxAge: 1000 * 60 * 60 * 24 * 5, // 5 hari
+      domain:
+        process.env.NODE_ENV === "production"
+          ? "https://focus-flow-app-rho.vercel.app"
+          : undefined,
     });
 
     res.status(200).json({
@@ -227,6 +231,10 @@ export const logout = async (req, res) => {
       secure: true, // Selalu true di produksi untuk HTTPS
       sameSite: "none", // Diperlukan untuk lintas situs
       maxAge: 0, // Hapus cookie
+      domain:
+        process.env.NODE_ENV === "production"
+          ? "https://focus-flow-app-rho.vercel.app"
+          : undefined,
     });
 
     res.status(200).json({
