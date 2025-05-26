@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173", // URL frontend
+    origin: "https://focus-flow-app-rho.vercel.app/login", // Ganti dengan URL frontend Anda
     credentials: true, // Membolehkan cookies dikirimkan
   })
 );
