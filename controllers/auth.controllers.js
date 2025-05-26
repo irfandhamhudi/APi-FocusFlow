@@ -160,9 +160,9 @@ export const loginUser = async (req, res) => {
 
     res.cookie("jwt", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-      maxAge: 1000 * 60 * 60 * 24 * 5,
+      secure: true, // Selalu true di produksi untuk HTTPS
+      sameSite: "none", // Diperlukan untuk lintas situs
+      maxAge: 1000 * 60 * 60 * 24 * 5, // 5 hari
     });
 
     res.status(200).json({
@@ -224,8 +224,9 @@ export const logout = async (req, res) => {
   try {
     res.clearCookie("jwt", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+      secure: true, // Selalu true di produksi untuk HTTPS
+      sameSite: "none", // Diperlukan untuk lintas situs
+      maxAge: 0, // Hapus cookie
     });
 
     res.status(200).json({
