@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000", // URL frontend
+    origin: process.env.CLIENT_URL || "http://localhost:5173", // URL frontend
     credentials: true, // Membolehkan cookies dikirimkan
   })
 );
