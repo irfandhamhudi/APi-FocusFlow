@@ -124,6 +124,7 @@ export const resendOtp = async (req, res) => {
 };
 
 // Login User
+// Login User
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -158,18 +159,22 @@ export const loginUser = async (req, res) => {
       expiresIn: "30d",
     });
 
+    // Set cookie with environment-based secure and sameSite settings
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("jwt", token, {
       httpOnly: true,
-      secure: true, // Selalu true di produksi untuk HTTPS
-      sameSite: "none", // Diperlukan untuk lintas situs
-      maxAge: 1000 * 60 * 60 * 24 * 5, // 5 hari
+      secure: isProduction, // Use secure only in production (HTTPS)
+      sameSite: isProduction ? "none" : "lax", // Use 'none' for cross-site in production, 'lax' for same-site in development
+      maxAge: 1000 * 60 * 60 * 24 * 5, // 5 days
     });
 
     res.status(200).json({
       success: true,
       message: "Login successful",
+      token, // Optionally return token for clients that prefer token-based auth
     });
   } catch (error) {
+    console.error(error);
     res
       .status(500)
       .json({ success: false, message: "Server error", error: error.message });
