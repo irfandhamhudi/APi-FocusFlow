@@ -155,75 +155,24 @@ export const loginUser = async (req, res) => {
     }
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h", // Short-lived access token
+      expiresIn: "30d",
     });
 
-    const refreshToken = jwt.sign(
-      { id: user._id },
-      process.env.REFRESH_TOKEN_SECRET,
-      {
-        expiresIn: "30d",
-      }
-    );
-
-    // Set JWT in cookie for web clients
     res.cookie("jwt", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // Secure in production
-      sameSite: "none",
-      maxAge: 1000 * 60 * 60, // 1 hour
-    });
-
-    // Set refresh token in cookie or return in response
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "none",
-      maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+      secure: true, // Selalu true di produksi untuk HTTPS
+      sameSite: "none", // Diperlukan untuk lintas situs
+      maxAge: 1000 * 60 * 60 * 24 * 5, // 5 hari
     });
 
     res.status(200).json({
       success: true,
       message: "Login successful",
-      token, // Return access token for non-browser clients
-      refreshToken, // Return refresh token for non-browser clients
     });
   } catch (error) {
     res
       .status(500)
       .json({ success: false, message: "Server error", error: error.message });
-  }
-};
-
-// Refresh Token
-export const refreshToken = async (req, res) => {
-  try {
-    const refreshToken = req.body.refreshToken || req.cookies.refreshToken;
-    if (!refreshToken) {
-      return res
-        .status(401)
-        .json({ success: false, message: "No refresh token provided" });
-    }
-
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid refresh token" });
-    }
-
-    const newAccessToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
-
-    res.status(200).json({
-      success: true,
-      token: newAccessToken,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(401).json({ success: false, message: "Invalid refresh token" });
   }
 };
 
