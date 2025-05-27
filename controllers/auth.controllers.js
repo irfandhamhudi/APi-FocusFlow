@@ -195,6 +195,7 @@ export const loginUser = async (req, res) => {
   }
 };
 
+// Refresh Token
 export const refreshToken = async (req, res) => {
   try {
     const refreshToken = req.body.refreshToken || req.cookies.refreshToken;

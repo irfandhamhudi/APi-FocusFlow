@@ -37,7 +37,7 @@ router.put("/update", authMiddleware, upload, updateUser);
 router.post("/logout", logout);
 
 // Refresh Token
-router.post("/refresh-token", authMiddleware, refreshToken);
+router.post("/refresh-token", refreshToken);
 
 // Get Me
 router.get("/me", authMiddleware, getMe);
