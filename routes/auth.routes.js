@@ -9,6 +9,7 @@ import {
   getMe,
   logout,
   updateUser,
+  refreshToken,
 } from "../controllers/auth.controllers.js";
 import authMiddleware from "../middleware/auth.middleware.js";
 import upload from "../middleware/upload.middleware.js";
@@ -34,6 +35,9 @@ router.put("/update", authMiddleware, upload, updateUser);
 
 // Logout User
 router.post("/logout", logout);
+
+// Refresh Token
+router.post("/refresh-token", authMiddleware, refreshToken);
 
 // Get Me
 router.get("/me", authMiddleware, getMe);
