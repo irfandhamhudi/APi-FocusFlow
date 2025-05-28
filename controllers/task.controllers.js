@@ -149,7 +149,7 @@ export const createTask = asyncHandler(async (req, res) => {
         if (!user) continue; // Lewati jika email tidak ditemukan
 
         const token = uuidv4(); // Buat token unik
-        const invitationLink = `http://localhost:5173/api/tasks/join/${token}`;
+        const invitationLink = `https://focus-flow-app-rho.vercel.app/api/tasks/join/${token}`;
 
         invitations.push({
           taskId: task._id,
@@ -342,7 +342,7 @@ export const updateTask = asyncHandler(async (req, res) => {
         if (!user) continue;
 
         const token = uuidv4();
-        const invitationLink = `http://localhost:5173/api/tasks/join/${token}`;
+        const invitationLink = `https://focus-flow-app-rho.vercel.app/api/tasks/join/${token}`;
 
         invitations.push({
           taskId: task._id,
