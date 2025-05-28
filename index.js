@@ -23,7 +23,10 @@ const startServer = async () => {
 
     app.use(
       cors({
-        origin: "https://focus-flow-app-rho.vercel.app",
+        origin: [
+          "https://focus-flow-app-rho.vercel.app",
+          "http://localhost:5173",
+        ],
         credentials: true,
       })
     );

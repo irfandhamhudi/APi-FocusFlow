@@ -4,6 +4,8 @@ import asyncHandler from "express-async-handler";
 import cloudinary from "../config/cloudinary.js";
 import mongoose from "mongoose";
 import Notification from "../models/notification.model.js";
+import { sendInvitationEmail } from "../utils/invite.email.js";
+import { v4 as uuidv4 } from "uuid"; // Untuk menghasilkan token unik
 
 // Create a new task
 export const createTask = asyncHandler(async (req, res) => {
@@ -15,7 +17,7 @@ export const createTask = asyncHandler(async (req, res) => {
     tags,
     startDate,
     dueDate,
-    assignedTo,
+    assignedTo, // Sekarang berisi array email
     subtask,
   } = req.body;
 
@@ -27,10 +29,10 @@ export const createTask = asyncHandler(async (req, res) => {
   let parsedAssignedTo = [];
   if (assignedTo) {
     try {
-      if (typeof assignedTo === "string") {
-        parsedAssignedTo = JSON.parse(assignedTo);
-      } else if (Array.isArray(assignedTo)) {
-        parsedAssignedTo = assignedTo;
+      parsedAssignedTo =
+        typeof assignedTo === "string" ? JSON.parse(assignedTo) : assignedTo;
+      if (!Array.isArray(parsedAssignedTo)) {
+        throw new Error("assignedTo must be an array of emails");
       }
     } catch (err) {
       console.error("Error parsing assignedTo:", err.message);
@@ -39,18 +41,25 @@ export const createTask = asyncHandler(async (req, res) => {
     }
   }
 
-  parsedAssignedTo = parsedAssignedTo.filter((id) =>
-    mongoose.Types.ObjectId.isValid(id)
+  // Validasi email dan cari pengguna berdasarkan email
+  const users = await User.find({ email: { $in: parsedAssignedTo } });
+  const validUsers = [];
+  const invalidEmails = parsedAssignedTo.filter(
+    (email) => !users.find((user) => user.email === email)
   );
+
+  if (invalidEmails.length > 0) {
+    console.warn("Invalid emails:", invalidEmails);
+    // Anda bisa memilih untuk melempar error atau melanjutkan
+  }
+
+  validUsers.push(...users.map((user) => user._id));
 
   let parsedSubtask = [];
   if (subtask) {
     try {
-      if (typeof subtask === "string") {
-        parsedSubtask = JSON.parse(subtask);
-      } else if (Array.isArray(subtask)) {
-        parsedSubtask = subtask;
-      }
+      parsedSubtask =
+        typeof subtask === "string" ? JSON.parse(subtask) : subtask;
     } catch (err) {
       console.error("Error parsing subtask:", err.message);
       res.status(400);
@@ -132,36 +141,55 @@ export const createTask = asyncHandler(async (req, res) => {
   // Buat undangan dan notifikasi untuk pengguna yang diundang
   if (parsedAssignedTo.length > 0) {
     try {
+      const invitations = [];
+      const notifications = [];
+
+      for (const email of parsedAssignedTo) {
+        const user = users.find((u) => u.email === email);
+        if (!user) continue; // Lewati jika email tidak ditemukan
+
+        const token = uuidv4(); // Buat token unik
+        const invitationLink = `http://localhost:5173/api/tasks/join/${token}`;
+
+        invitations.push({
+          taskId: task._id,
+          status: "pending",
+          invitedAt: new Date(),
+          token,
+        });
+
+        notifications.push({
+          user: user._id,
+          actor: req.user._id,
+          task: task._id,
+          message: `${req.user.username} invited you to join ${task.title}.`,
+          read: false,
+        });
+
+        // Kirim email undangan
+        await sendInvitationEmail(email, task.title, invitationLink);
+      }
+
+      // Tambahkan undangan ke pengguna
       await User.updateMany(
-        { _id: { $in: parsedAssignedTo } },
+        { email: { $in: parsedAssignedTo } },
         {
           $push: {
-            invitations: {
-              taskId: task._id,
-              status: "pending",
-              invitedAt: new Date(),
-            },
+            invitations: { $each: invitations },
           },
         }
       );
 
-      // Buat notifikasi untuk setiap pengguna yang diundang
-      const notifications = parsedAssignedTo.map((userId) => ({
-        user: userId,
-        actor: req.user._id,
-        task: task._id, // Pastikan ini adalah string ObjectId
-        message: `${req.user.username} invited you to join ${task.title}.`,
-        read: false,
-      }));
+      // Buat notifikasi
       await Notification.insertMany(notifications);
     } catch (err) {
       console.error(
-        "Error creating invitations or notifications:",
+        "Error creating invitations, notifications, or sending emails:",
         err.message
       );
       res.status(500);
       throw new Error(
-        "Failed to create invitations or notifications for users"
+        "Failed to create invitations, notifications, or send emails"
       );
     }
   }
@@ -250,7 +278,7 @@ export const updateTask = asyncHandler(async (req, res) => {
     throw new Error("Not authorized to update this task");
   }
 
-  let updatedAssignedTo = [...task.assignedTo]; // Mulai dengan assignedTo saat ini
+  let updatedAssignedTo = [...task.assignedTo];
   let assignedToUpdated = false;
   let usersToInvite = [];
   let usersToRemove = [];
@@ -262,9 +290,16 @@ export const updateTask = asyncHandler(async (req, res) => {
           ? JSON.parse(req.body.assignedTo)
           : req.body.assignedTo;
 
-      const validAssignedTo = inputAssignedTo
-        .filter((id) => mongoose.Types.ObjectId.isValid(id))
-        .map((id) => new mongoose.Types.ObjectId(id));
+      // Cari pengguna berdasarkan email
+      const users = await User.find({ email: { $in: inputAssignedTo } });
+      const validAssignedTo = users.map((user) => user._id);
+      const invalidEmails = inputAssignedTo.filter(
+        (email) => !users.find((user) => user.email === email)
+      );
+
+      if (invalidEmails.length > 0) {
+        console.warn("Invalid emails:", invalidEmails);
+      }
 
       const operation = req.body.assignedToOperation || "replace";
       if (operation === "add") {
@@ -296,38 +331,56 @@ export const updateTask = asyncHandler(async (req, res) => {
     }
   }
 
-  // Buat undangan dan notifikasi untuk pengguna baru yang diundang
+  // Buat undangan, notifikasi, dan kirim email untuk pengguna baru
   if (usersToInvite.length > 0) {
     try {
+      const invitations = [];
+      const notifications = [];
+
+      for (const userId of usersToInvite) {
+        const user = await User.findById(userId);
+        if (!user) continue;
+
+        const token = uuidv4();
+        const invitationLink = `http://localhost:5173/api/tasks/join/${token}`;
+
+        invitations.push({
+          taskId: task._id,
+          status: "pending",
+          invitedAt: new Date(),
+          token,
+        });
+
+        notifications.push({
+          user: userId,
+          actor: req.user._id,
+          task: task._id,
+          message: `${req.user.username} invited you to join ${task.title}.`,
+          read: false,
+        });
+
+        // Kirim email undangan
+        await sendInvitationEmail(user.email, task.title, invitationLink);
+      }
+
       await User.updateMany(
         { _id: { $in: usersToInvite } },
         {
           $push: {
-            invitations: {
-              taskId: task._id,
-              status: "pending",
-              invitedAt: new Date(),
-            },
+            invitations: { $each: invitations },
           },
         }
       );
 
-      const notifications = usersToInvite.map((userId) => ({
-        user: userId,
-        actor: req.user._id,
-        task: task._id,
-        message: `${req.user.username} invited you to join ${task.title}.`,
-        read: false,
-      }));
       await Notification.insertMany(notifications);
     } catch (err) {
       console.error(
-        "Error creating invitations or notifications:",
+        "Error creating invitations, notifications, or sending emails:",
         err.message
       );
       res.status(500);
       throw new Error(
-        "Failed to create invitations or notifications for users"
+        "Failed to create invitations, notifications, or send emails"
       );
     }
   }
@@ -392,7 +445,7 @@ export const updateTask = asyncHandler(async (req, res) => {
   let updatedAttachments = task.attachment;
   let attachmentsUpdated = false;
   let uploadedFiles = [];
-  let uploadedImages = []; // Untuk menyimpan gambar yang baru diunggah
+  let uploadedImages = [];
   if (req.files && req.files.length > 0) {
     const newAttachments = req.files.map((file) => {
       const fileType = file.mimetype.startsWith("image/")
@@ -402,7 +455,6 @@ export const updateTask = asyncHandler(async (req, res) => {
         : "document";
       const fileSizeInMB = (file.size / (1024 * 1024)).toFixed(2);
 
-      // Jika file adalah gambar, tambahkan ke uploadedImages
       if (fileType === "image") {
         uploadedImages.push(file.originalname);
       }
@@ -428,7 +480,6 @@ export const updateTask = asyncHandler(async (req, res) => {
 
   const activityLogs = [];
 
-  // Tambahkan log aktivitas jika ada file yang diunggah
   if (uploadedFiles.length > 0) {
     const fileNames = uploadedFiles.join(", ");
     activityLogs.push({
@@ -438,13 +489,12 @@ export const updateTask = asyncHandler(async (req, res) => {
     });
   }
 
-  // Tambahkan notifikasi jika ada gambar yang diunggah
   if (uploadedImages.length > 0) {
     const imageNames = uploadedImages.join(", ");
     const recipients = [
       task.owner.toString(),
       ...task.assignedTo.map((id) => id.toString()),
-    ].filter((id) => id !== req.user._id.toString()); // Kecualikan pengguna yang melakukan update
+    ].filter((id) => id !== req.user._id.toString());
 
     const notifications = recipients.map((userId) => ({
       user: userId,
@@ -458,11 +508,9 @@ export const updateTask = asyncHandler(async (req, res) => {
       await Notification.insertMany(notifications);
     } catch (err) {
       console.error("Error creating image update notifications:", err.message);
-      // Tidak melempar error karena ini bukan operasi kritis
     }
   }
 
-  // Tambahan logika untuk activity logs lainnya (misalnya, jika status atau priority diubah)
   if (req.body.status && req.body.status !== task.status) {
     activityLogs.push({
       user: req.user._id,
@@ -600,9 +648,36 @@ export const addComment = asyncHandler(async (req, res) => {
 
   task.comments.push(newComment);
 
+  // Deteksi mention dalam komentar
+  const mentionRegex = /@(\w+)/g;
+  const mentions = req.body.comment.match(mentionRegex) || [];
+  const mentionedUsers = [];
+
+  if (mentions.length > 0) {
+    // Ambil daftar pengguna berdasarkan username yang disebutkan
+    const usernames = mentions.map((mention) => mention.replace("@", ""));
+    const users = await User.find(
+      { username: { $in: usernames } },
+      "_id username"
+    );
+
+    mentionedUsers.push(...users.map((user) => user._id));
+
+    // Buat notifikasi untuk pengguna yang ditandai
+    const notifications = mentionedUsers.map((userId) => ({
+      user: userId,
+      actor: req.user._id,
+      task: task._id,
+      message: `${req.user.username} mentioned you in a comment: ${req.body.comment} on ${task.title}.`,
+      read: false,
+    }));
+    await Notification.insertMany(notifications);
+  }
+
+  // Tambahkan aksi dengan format yang konsisten untuk frontend
   task.activity.push({
     user: req.user._id,
-    action: `${req.user.username} added comment : ${req.body.comment}`,
+    action: `${req.user.username} added comment ${req.body.comment}`,
     createdAt: new Date(),
   });
 
@@ -639,13 +714,11 @@ export const addCommentReply = asyncHandler(async (req, res) => {
     throw new Error("Not authorized to reply to this comment");
   }
 
-  // Populate comment.user untuk mendapatkan informasi pengguna yang membuat komentar awal
   await Task.populate(task, {
     path: "comments.user",
     select: "username email avatar",
   });
 
-  // Ambil username pengguna yang membuat komentar awal
   const commentedUser = comment.user;
   const commentedUsername = commentedUser ? commentedUser.username : "Unknown";
 
@@ -654,17 +727,318 @@ export const addCommentReply = asyncHandler(async (req, res) => {
     user: req.user._id,
     comment: req.body.comment,
     createdAt: new Date(),
+    updatedAt: new Date(), // Tambahkan updatedAt saat pembuatan
   };
   comment.replies.push(newReply);
 
-  // Tambahkan aksi dengan format yang diinginkan
+  const mentionRegex = /@(\w+)/g;
+  const mentions = req.body.comment.match(mentionRegex) || [];
+  const mentionedUsers = [];
+
+  if (mentions.length > 0) {
+    const usernames = mentions.map((mention) => mention.replace("@", ""));
+    const users = await User.find(
+      { username: { $in: usernames } },
+      "_id username"
+    );
+
+    mentionedUsers.push(...users.map((user) => user._id));
+
+    const notifications = mentionedUsers.map((userId) => ({
+      user: userId,
+      actor: req.user._id,
+      task: task._id,
+      message: `${req.user.username} mentioned you in a reply: ${req.body.comment} on ${task.title}.`,
+      read: false,
+    }));
+    await Notification.insertMany(notifications);
+  }
+
   task.activity.push({
     user: req.user._id,
-    action: `${req.user.username} replied to comment ( ${commentedUsername} ) : ${req.body.comment}`,
+    action: `${req.user.username} replied comment ${req.body.comment}`,
     createdAt: new Date(),
   });
 
-  // Simpan perubahan dan populate data terkait
+  const updatedTask = await task.save();
+  await updatedTask.populate("owner", "username email avatar");
+  await updatedTask.populate("assignedTo", "username email avatar");
+  await updatedTask.populate("activity.user", "username email avatar");
+  await updatedTask.populate("comments.user", "username email avatar");
+  await updatedTask.populate("comments.replies.user", "username email avatar");
+
+  res.json(updatedTask);
+});
+
+// Edit a comment reply
+export const editCommentReply = asyncHandler(async (req, res) => {
+  const { id: taskId, commentId, replyId } = req.params;
+  const { comment } = req.body; // Teks reply yang diperbarui
+
+  if (!comment || typeof comment !== "string" || comment.trim() === "") {
+    res.status(400);
+    throw new Error("Reply is required and cannot be empty");
+  }
+
+  const task = await Task.findById(taskId);
+  if (!task) {
+    res.status(404);
+    throw new Error("Task not found");
+  }
+
+  const targetComment = task.comments.id(commentId);
+  if (!targetComment) {
+    res.status(404);
+    throw new Error("Comment not found");
+  }
+
+  const targetReply = targetComment.replies.id(replyId);
+  if (!targetReply) {
+    res.status(404);
+    throw new Error("Reply not found");
+  }
+
+  // Validasi otorisasi: hanya pembuat reply yang bisa mengedit
+  if (targetReply.user.toString() !== req.user._id.toString()) {
+    res.status(401);
+    throw new Error("Not authorized to edit this reply");
+  }
+
+  // Simpan teks reply lama untuk log aktivitas
+  const oldReply = targetReply.comment;
+  targetReply.comment = comment.trim();
+  targetReply.updatedAt = new Date();
+
+  // Deteksi mention dalam reply yang diperbarui
+  const mentionRegex = /@(\w+)/g;
+  const mentions = comment.match(mentionRegex) || [];
+  const mentionedUsers = [];
+
+  if (mentions.length > 0) {
+    const usernames = mentions.map((mention) => mention.replace("@", ""));
+    const users = await User.find(
+      { username: { $in: usernames } },
+      "_id username"
+    );
+
+    mentionedUsers.push(...users.map((user) => user._id));
+
+    const existingMentions = oldReply.match(mentionRegex) || [];
+    const newMentions = mentionedUsers.filter(
+      (userId) =>
+        !existingMentions.some(
+          async (mention) =>
+            mention.replace("@", "") === (await User.findById(userId)).username
+        )
+    );
+
+    if (newMentions.length > 0) {
+      const notifications = newMentions.map((userId) => ({
+        user: userId,
+        actor: req.user._id,
+        task: task._id,
+        message: `${req.user.username} mentioned you in an edited reply: ${comment} on ${task.title}.`,
+        read: false,
+      }));
+      await Notification.insertMany(notifications);
+    }
+  }
+
+  // Tambahkan log aktivitas untuk edit reply
+  task.activity.push({
+    user: req.user._id,
+    action: `${req.user.username} edited reply from "${oldReply}" to "${comment}"`,
+    createdAt: new Date(),
+  });
+
+  const updatedTask = await task.save();
+  await updatedTask.populate("owner", "username email avatar");
+  await updatedTask.populate("assignedTo", "username email avatar");
+  await updatedTask.populate("activity.user", "username email avatar");
+  await updatedTask.populate("comments.user", "username email avatar");
+  await updatedTask.populate("comments.replies.user", "username email avatar");
+
+  res.json(updatedTask);
+});
+
+// Delete a comment reply
+export const deleteCommentReply = asyncHandler(async (req, res) => {
+  const { id: taskId, commentId, replyId } = req.params;
+
+  const task = await Task.findById(taskId);
+  if (!task) {
+    res.status(404);
+    throw new Error("Task not found");
+  }
+
+  const targetComment = task.comments.id(commentId);
+  if (!targetComment) {
+    res.status(404);
+    throw new Error("Comment not found");
+  }
+
+  const targetReply = targetComment.replies.id(replyId);
+  if (!targetReply) {
+    res.status(404);
+    throw new Error("Reply not found");
+  }
+
+  // Validasi otorisasi: hanya pembuat reply atau pemilik task yang bisa menghapus
+  if (
+    targetReply.user.toString() !== req.user._id.toString() &&
+    task.owner.toString() !== req.user._id.toString()
+  ) {
+    res.status(401);
+    throw new Error("Not authorized to delete this reply");
+  }
+
+  // Simpan teks reply yang dihapus untuk log aktivitas
+  const deletedReply = targetReply.comment;
+
+  // Hapus reply dari array replies
+  targetComment.replies.pull({ _id: replyId });
+
+  // Tambahkan log aktivitas untuk penghapusan reply
+  task.activity.push({
+    user: req.user._id,
+    action: `${req.user.username} deleted reply: "${deletedReply}"`,
+    createdAt: new Date(),
+  });
+
+  const updatedTask = await task.save();
+  await updatedTask.populate("owner", "username email avatar");
+  await updatedTask.populate("assignedTo", "username email avatar");
+  await updatedTask.populate("activity.user", "username email avatar");
+  await updatedTask.populate("comments.user", "username email avatar");
+  await updatedTask.populate("comments.replies.user", "username email avatar");
+
+  res.json(updatedTask);
+});
+
+// Edit a comment
+export const editComment = asyncHandler(async (req, res) => {
+  const { id: taskId, commentId } = req.params;
+  const { comment } = req.body; // Teks komentar yang diperbarui
+
+  if (!comment || typeof comment !== "string" || comment.trim() === "") {
+    res.status(400);
+    throw new Error("Comment is required and cannot be empty");
+  }
+
+  const task = await Task.findById(taskId);
+  if (!task) {
+    res.status(404);
+    throw new Error("Task not found");
+  }
+
+  const targetComment = task.comments.id(commentId);
+  if (!targetComment) {
+    res.status(404);
+    throw new Error("Comment not found");
+  }
+
+  // Validasi otorisasi: hanya pembuat komentar yang bisa mengedit
+  if (targetComment.user.toString() !== req.user._id.toString()) {
+    res.status(401);
+    throw new Error("Not authorized to edit this comment");
+  }
+
+  // Simpan teks komentar lama untuk log aktivitas
+  const oldComment = targetComment.comment;
+  targetComment.comment = comment.trim();
+  targetComment.updatedAt = new Date();
+
+  // Deteksi mention dalam komentar yang diperbarui
+  const mentionRegex = /@(\w+)/g;
+  const mentions = comment.match(mentionRegex) || [];
+  const mentionedUsers = [];
+
+  if (mentions.length > 0) {
+    const usernames = mentions.map((mention) => mention.replace("@", ""));
+    const users = await User.find(
+      { username: { $in: usernames } },
+      "_id username"
+    );
+
+    mentionedUsers.push(...users.map((user) => user._id));
+
+    // Buat notifikasi untuk pengguna yang baru ditandai (jika ada pengguna baru)
+    const existingMentions = oldComment.match(mentionRegex) || [];
+    const newMentions = mentionedUsers.filter(
+      (userId) =>
+        !existingMentions.some(
+          async (mention) =>
+            mention.replace("@", "") === (await User.findById(userId)).username
+        )
+    );
+
+    if (newMentions.length > 0) {
+      const notifications = newMentions.map((userId) => ({
+        user: userId,
+        actor: req.user._id,
+        task: task._id,
+        message: `${req.user.username} mentioned you in an edited comment: ${comment} on ${task.title}.`,
+        read: false,
+      }));
+      await Notification.insertMany(notifications);
+    }
+  }
+
+  // Tambahkan log aktivitas untuk edit komentar
+  task.activity.push({
+    user: req.user._id,
+    action: `${req.user.username} edited comment from "${oldComment}" to "${comment}"`,
+    createdAt: new Date(),
+  });
+
+  const updatedTask = await task.save();
+  await updatedTask.populate("owner", "username email avatar");
+  await updatedTask.populate("assignedTo", "username email avatar");
+  await updatedTask.populate("activity.user", "username email avatar");
+  await updatedTask.populate("comments.user", "username email avatar");
+  await updatedTask.populate("comments.replies.user", "username email avatar");
+
+  res.json(updatedTask);
+});
+
+// Delete a comment
+export const deleteComment = asyncHandler(async (req, res) => {
+  const { id: taskId, commentId } = req.params;
+
+  const task = await Task.findById(taskId);
+  if (!task) {
+    res.status(404);
+    throw new Error("Task not found");
+  }
+
+  const targetComment = task.comments.id(commentId);
+  if (!targetComment) {
+    res.status(404);
+    throw new Error("Comment not found");
+  }
+
+  // Validasi otorisasi: hanya pembuat komentar yang bisa menghapus
+  if (
+    task.owner.toString() !== req.user._id.toString() &&
+    targetComment.user.toString() !== req.user._id.toString()
+  ) {
+    res.status(401);
+    throw new Error("Not authorized to delete this comment");
+  }
+
+  // Simpan teks komentar yang dihapus untuk log aktivitas
+  const deletedComment = targetComment.comment;
+
+  // Hapus komentar dari array comments
+  task.comments.pull({ _id: commentId });
+
+  // Tambahkan log aktivitas untuk penghapusan komentar
+  task.activity.push({
+    user: req.user._id,
+    action: `${req.user.username} deleted comment: "${deletedComment}"`,
+    createdAt: new Date(),
+  });
+
   const updatedTask = await task.save();
   await updatedTask.populate("owner", "username email avatar");
   await updatedTask.populate("assignedTo", "username email avatar");
@@ -878,4 +1252,64 @@ export const declineInvitation = asyncHandler(async (req, res) => {
   );
 
   res.json({ message: "Invitation declined successfully" });
+});
+
+// Join task via invitation link
+export const joinTask = asyncHandler(async (req, res) => {
+  const { token } = req.params;
+
+  // Cari pengguna dengan token undangan
+  const user = await User.findOne({
+    "invitations.token": token,
+    "invitations.status": "pending",
+  });
+
+  if (!user) {
+    res.status(404);
+    throw new Error("Invalid or expired invitation token");
+  }
+
+  const invitation = user.invitations.find((inv) => inv.token === token);
+  if (!invitation) {
+    res.status(404);
+    throw new Error("Invitation not found");
+  }
+
+  const task = await Task.findById(invitation.taskId);
+  if (!task) {
+    res.status(404);
+    throw new Error("Task not found");
+  }
+
+  // Perbarui status undangan
+  invitation.status = "accepted";
+  user.assignedTasks.push(task._id);
+  await user.save();
+
+  // Tambahkan pengguna ke task.assignedTo
+  task.assignedTo.push(user._id);
+  task.activity.push({
+    user: user._id,
+    action: `${user.username} accepted invitation to join ${task.title} via link`,
+    createdAt: new Date(),
+  });
+  await task.save();
+
+  // Perbarui notifikasi menjadi dibaca
+  await Notification.updateMany(
+    { user: user._id, task: task._id },
+    { read: true }
+  );
+
+  const populatedTask = await Task.findById(task._id)
+    .populate("owner", "username email avatar")
+    .populate("assignedTo", "username email avatar")
+    .populate("activity.user", "username email avatar")
+    .populate("comments.user", "username email avatar")
+    .populate("comments.replies.user", "username email avatar");
+
+  res.json({
+    message: "Successfully joined task",
+    task: populatedTask,
+  });
 });

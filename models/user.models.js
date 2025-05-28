@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const userSchema = mongoose.Schema(
   {
-    username: { type: String, required: true },
+    username: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     isVerified: { type: Boolean, default: false },
@@ -19,14 +19,19 @@ const userSchema = mongoose.Schema(
         taskId: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Task",
-          required: true,
         },
         status: {
           type: String,
           enum: ["pending", "accepted", "declined"],
           default: "pending",
         },
-        invitedAt: { type: Date, default: Date.now },
+        invitedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        token: {
+          type: String, // Simpan token undangan
+        },
       },
     ],
     isNewUser: {

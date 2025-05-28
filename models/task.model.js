@@ -110,6 +110,9 @@ const taskSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
       },
+      updatedAt: {
+        type: Date,
+      },
       replies: [
         {
           user: {
@@ -124,6 +127,9 @@ const taskSchema = new mongoose.Schema({
           createdAt: {
             type: Date,
             default: Date.now,
+          },
+          updatedAt: {
+            type: Date,
           },
         },
       ],

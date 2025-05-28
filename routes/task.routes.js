@@ -11,6 +11,11 @@ import {
   downloadFile,
   declineInvitation,
   acceptInvitation,
+  editComment,
+  deleteComment,
+  editCommentReply,
+  deleteCommentReply,
+  joinTask,
 
   // joinTask,
 } from "../controllers/task.controllers.js";
@@ -22,6 +27,7 @@ router.route("/recent-activity").get(authMiddleware, getRecentActivity);
 
 router.get("/download/:taskId/:fileName", authMiddleware, downloadFile);
 // router.post("/:taskId/join", authMiddleware, joinTask);
+router.get("/join/:token", authMiddleware, joinTask);
 
 // Task routes
 router
@@ -39,6 +45,16 @@ router.route("/:id/comments").post(authMiddleware, addComment);
 router
   .route("/:id/comments/:commentId/replies")
   .post(authMiddleware, addCommentReply);
+
+router
+  .route("/:id/comments/:commentId/replies/:replyId")
+  .patch(authMiddleware, editCommentReply)
+  .delete(authMiddleware, deleteCommentReply);
+
+router
+  .route("/:id/comments/:commentId")
+  .patch(authMiddleware, editComment)
+  .delete(authMiddleware, deleteComment);
 
 // Rute untuk accept dan decline invitation
 router

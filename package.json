@@ -4,10 +4,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js", 
-    "dev": "nodemon index.js", 
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "echo \"Build script if needed\" && exit 0" 
+    "build": "echo \"Build script if needed\" && exit 0"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +27,8 @@
     "multer-storage-cloudinary": "^4.0.0",
     "nodemailer": "^7.0.3",
     "slugify": "^1.6.6",
+    "socket.io": "^4.8.1",
+    "uuid": "^11.1.0",
     "winston": "^3.17.0"
   }
 }

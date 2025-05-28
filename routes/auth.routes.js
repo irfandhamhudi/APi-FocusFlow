@@ -9,6 +9,7 @@ import {
   getMe,
   logout,
   updateUser,
+  getAssignedUsers,
 } from "../controllers/auth.controllers.js";
 import authMiddleware from "../middleware/auth.middleware.js";
 import upload from "../middleware/upload.middleware.js";
@@ -34,6 +35,9 @@ router.put("/update", authMiddleware, upload, updateUser);
 
 // Logout User
 router.post("/logout", logout);
+
+// Get Assigned Users
+router.get("/assigned-users", authMiddleware, getAssignedUsers);
 
 // Get Me
 router.get("/me", authMiddleware, getMe);

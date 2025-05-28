@@ -5,6 +5,8 @@ import sendEmail from "../utils/send.email.js";
 import jwt from "jsonwebtoken";
 import cloudinary from "../config/cloudinary.js";
 import Notification from "../models/notification.model.js";
+import Task from "../models/task.model.js";
+import asyncHandler from "express-async-handler";
 
 // Register User
 export const registerUser = async (req, res) => {
@@ -55,7 +57,7 @@ export const registerUser = async (req, res) => {
       message:
         "Registration successful. Please check your email to get the OTP.",
       userId: user._id,
-      welcomeMessage: `Welcome to FocusFlow, ${username}! We're excited to have you on board. Please verify your email to get started.`,
+      welcomeMessage: `Welcome to FocusFlow, ${username}!`,
     });
   } catch (error) {
     console.error(error);
@@ -340,3 +342,19 @@ export const updateUser = async (req, res) => {
     });
   }
 };
+
+export const getAssignedUsers = asyncHandler(async (req, res) => {
+  const tasks = await Task.find({
+    $or: [{ owner: req.user._id }, { assignedTo: req.user._id }],
+  }).select("assignedTo");
+  const assignedUserIds = [
+    ...new Set(
+      tasks.flatMap((task) => task.assignedTo.map((id) => id.toString()))
+    ),
+  ];
+  const users = await User.find({
+    _id: { $in: assignedUserIds },
+    isVerified: true,
+  }).select("username email avatar");
+  res.json(users);
+});
