@@ -13,7 +13,7 @@ export const sendInvitationEmail = async (to, taskTitle, invitationLink) => {
   try {
     await transporter.sendMail({
       from: `"Task Manager" <${process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_USER,
+      to,
       subject: `Invitation to Join Task: ${taskTitle}`,
       html: `
         <h3>You have been invited to join a task!</h3>
